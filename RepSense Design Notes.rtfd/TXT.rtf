@@ -1,0 +1,185 @@
+{\rtf1\ansi\ansicpg1252\cocoartf2822
+\cocoatextscaling0\cocoaplatform0{\fonttbl\f0\fswiss\fcharset0 Helvetica-Bold;\f1\fswiss\fcharset0 Helvetica;\f2\fnil\fcharset0 LucidaGrande;
+\f3\froman\fcharset0 Times-Roman;\f4\fswiss\fcharset0 ArialMT;\f5\froman\fcharset0 Times-Bold;
+}
+{\colortbl;\red255\green255\blue255;\red0\green0\blue0;\red16\green60\blue192;\red255\green255\blue255;
+\red186\green186\blue186;}
+{\*\expandedcolortbl;;\cssrgb\c0\c0\c0;\cssrgb\c6667\c33333\c80000;\cssrgb\c100000\c100000\c100000;
+\cssrgb\c77647\c77647\c77647;}
+\margl1440\margr1440\vieww27120\viewh20480\viewkind0
+\pard\tx720\tx1440\tx2160\tx2880\tx3600\tx4320\tx5040\tx5760\tx6480\tx7200\tx7920\tx8640\pardirnatural\partightenfactor0
+
+\f0\b\fs50 \cf0 Design optimizations\
+
+\f1\b0\fs24 The design of this pcb is optimized for low power, size, and progammability.
+\f0\b\fs50 \
+Main MCU - NRF52840\
+
+\f1\b0\fs24 The nRF52840 was chosen because it hits every requirement of this project in a single chip. It has a Cortex-M4 with hardware floating point which is needed for the EKF sensor fusion math. It has native USB built in so no bridge chip is needed for programming. It has BLE 5.0 built in for the future phone integration without adding any external module. Its deep sleep current is around 1.5\'b5A which is critical for a wearable running on a small LiPo. It also has an internal DC-DC converter that can be enabled in firmware to improve power efficiency further. The nRF52840 is the same chip used in the Seeed XIAO dev board already validated for this project, meaning the firmware toolchain, libraries, and IMU drivers are already familiar. No other single chip combines low power, native USB, BLE, and sufficient processing headroom for motion algorithms at this price point and package size.\
+\
+The chip also has internal regulator; it can accept up to 5V5 on its VDDH pin and internally step down to 3V3 for internal use and external power. So no LDO is actually needed on this board because of it.\
+\
+I went with the QFN-73 variant even though all 73 pins weren\'92t needed (mcu will only support IMU and LCD). The nRF52840 comes in two QFN packages - QFN73 (7x7mm) and QFN48 (6x6mm). The QFN48 was rejected immediately because it has no USB pins - D+, D-, and VBUS are all absent. Since this design relies on USB for drag-and-drop firmware flashing and for detecting when the charger is plugged in, the QFN48 is a hard no regardless of its smaller size. The 1mm size difference on each side is irrelevant on a 42mm PCB anyway. QFN73 it is, LCSC part C190794.\
+\
+The baseline design was followed by Nordic\'92s documentation: https://docs.nordicsemi.com/bundle/ps_nrf52840/page/pin.html\
+For the QFN73 there are 7 different configurations to follow based on your circuitry. I followed the one that allows features as:\
+Selected: Config 4 (QIAA aQFN73) \
+\
+VDDH = Battery/Ext. regulator (PMIC output) The PMIC output (sourced from either USB or LiPo depending on what's plugged in) feeds directly into VDDH. This puts the chip in High Voltage mode, meaning the internal REG0 regulator handles stepping the input voltage down internally. No external LDO required.\
+ VDD = N/A In High Voltage mode VDD is an output, not an input. The internal REG0 regulator produces the regulated 3.3V on this pin. Left unconnected from any external supply. \
+EXTSUPPLY = Yes The regulated 3.3V on VDD is exposed to power external components \'97 specifically the LSM6DSV IMU (0.65mA max) and the display. \
+DCDCEN0 must be enabled for this to work reliably given the current draw of the display. DCDCEN0 = Yes Enables the internal DC-DC switching converter for REG0 instead of the internal LDO. This raises the maximum current the chip can supply externally beyond the 25mA LDO limit, and is more efficient \'97 it draws less from the battery for the same output. Requires one external 10\'b5H inductor on the DCCH pin. This is the only extra passive component this config adds. \
+DCDCEN1 = No The REG1 DC-DC converter (which powers the chip core from VDD) is left disabled for v1 simplicity. REG1 runs as internal LDO instead. Can be enabled in a future revision for further efficiency gains. \
+USB = Yes D+ and D- are wired to the USB-C connector for firmware flashing. \
+VBUS is connected to the USB-C 5V line so the chip can detect when USB is plugged in and trigger the appropriate power and charging events in firmware. NFC = No NFC pins left unconnected. Not used in v1 or v2.\
+\
+AD2 VBUS - It's just a sense/detection pin with its own isolated internal regulator. You wire it to VBUS on the USB-C connector (5V)\
+AD14 VDD - in Config 4 VDD is an output. It's your 3.3V rail that goes to: IMU (VDD pin on LSM6DSV) Display (VCC pin) Any other 3.3V peripherals And it also has decoupling caps to GND on each VDD pin of the nRF52840 itself \'97 the datasheet specifies 100nF on each one, placed as close to the pin as physically possible on the PCB. So on schematic VDD is just a net label "3V3" that connects to everything that needs 3.3V.\
+SWD Debugging\
+The J-Link and Tag-Connect are two separate physical things that connect together in a chain: Mac 
+\f2 \uc0\u8594 
+\f1  USB cable 
+\f2 \uc0\u8594 
+\f1  J-Link EDU Mini 
+\f2 \uc0\u8594 
+\f1  J-Link's ribbon cable 
+\f2 \uc0\u8594 
+\f1  Tag-Connect adapter 
+\f2 \uc0\u8594 
+\f1  Tag-Connect cable 
+\f2 \uc0\u8594 
+\f1  PCB pads\
+ANT NOT BEING USED.\
+\
+DN-004 \'97 32.768kHz RTC Crystal (XL1/XL2) The nRF52840 has two crystal inputs \'97 a mandatory 32MHz main clock on XC1/XC2 and an optional 32.768kHz low-frequency crystal on XL1/XL2 used for RTC timekeeping and accurate BLE low-power advertising. For v1 the 32.768kHz crystal is omitted. This device has no timekeeping requirement and BLE is not implemented in v1, so the internal RC oscillator is sufficient for basic sleep/wake timing. XL1 and XL2 are left as no-connect in the schematic. The crystal footprint will be added as DNP on the PCB for potential population in v2 when BLE and low-power sleep modes are implemented.\
+\
+NFC1/2 pins - antenna loop not being used\
+\pard\pardeftab720\partightenfactor0
+
+\f3 \cf0 \expnd0\expndtw0\kerning0
+In KiCad: put no-connect flags on NFC1 and NFC2, done\
+In firmware: one UICR register write to disable NFC mode, or use a framework that does it for you\
+\pard\tx720\tx1440\tx2160\tx2880\tx3600\tx4320\tx5040\tx5760\tx6480\tx7200\tx7920\tx8640\pardirnatural\partightenfactor0
+
+\f1 \cf0 \kerning1\expnd0\expndtw0 \
+\pard\tx720\tx1440\tx2160\tx2880\tx3600\tx4320\tx5040\tx5760\tx6480\tx7200\tx7920\tx8640\pardirnatural\partightenfactor0
+\cf0 Battery power path IC measurement\
+\pard\tx720\tx1440\tx2160\tx2880\tx3600\tx4320\tx5040\tx5760\tx6480\tx7200\tx7920\tx8640\pardirnatural\partightenfactor0
+
+\f0\b\fs50 \cf0 \
+IMU\
+\pard\tx720\tx1440\tx2160\tx2880\tx3600\tx4320\tx5040\tx5760\tx6480\tx7200\tx7920\tx8640\pardirnatural\partightenfactor0
+
+\fs40 \cf0 3. IMU\
+\pard\pardeftab720\partightenfactor0
+{\field{\*\fldinst{HYPERLINK "https://www.lcsc.com/product-detail/C5267399.html?s_z=n_q_imu&spm=wm.ssy.bg.1.xh&lcsc_vid=T1hWUFxeEwdcV1NeE1lXAlBURgRXVwECTlZcAVJWRlUxVlNRQVJYVVVTQ1lcUDsOAxUeFF5JWBYZEEoKFBINSQcJGk4eFQsCAgIaSgADAwAHC0slRFhWU1dVRVlADxALGw%3D%3D"}}{\fldrslt 
+\f4\b0\fs29\fsmilli14667 \AppleTypeServices\AppleTypeServicesF65539 \cf3 \cb4 \expnd0\expndtw0\kerning0
+\ul \ulc3 LSM6DSVTR}}
+\f4\b0\fs29\fsmilli14667 \AppleTypeServices\AppleTypeServicesF65539 \cb4 \expnd0\expndtw0\kerning0
+\'a0\AppleTypeServices \cb5 \
+\pard\pardeftab720\partightenfactor0
+
+\f0\b\fs24 \cf0 \cb1 \kerning1\expnd0\expndtw0 \
+
+\f4\b0\fs29\fsmilli14667 \AppleTypeServices\AppleTypeServicesF65539 \cb4 \expnd0\expndtw0\kerning0
+Justification: \
+- ST ecosystem + supported by Arduino libraries \
+- 6 axis IMU (3-axis accelerometer, 3-axis gyroscope) with digital I2C/SPI interface\
+-low power consumption\
+- integrated sensor fusion and programmable finite state machine (FSM) , reducing MCU processing load and enabling more advanced motion features without firmware complexity\
+- high performance, widely used so lots more documentation\
+- configurable ranges (2-16g acule, up to 4000dps gyro) to support low noise precision sensing, high-dynamic applications\
+- low-power \'93always on\'94 operation\
+- large FIFO - enables buffering of motion data, reducing MCU interrupt load and allowing more efficient data handling\
+\
+Power:\
+1.7 - 3.6V, 1.8V typical. I am powering it via 3V3.\
+0.65mA active in high-performance mode (accel + gyro) for 1.8V.\
+	Estimated current for 3.3V:\
+		If P = 1.8 * 0.65 = 1.17mW and P remains same regardless of 1.8V or 3V3,\
+		I_3V3 = 1.17/3.3V = 0.35\
+	Current is estimated to 0.35mA with 3.3V\
+\
+Address: 0x6A (SA0 = 0) or 0x6B(SA0 = 1)\
+\
+Design notes:\
+Datasheet mentions 3 possible interface connections. Mode 1 was selected which is MCU communicating to IMU via I2C. Other modes are not relevant as they treat the IMU as a master \
+\
+	SD0/SA0 - Connected to GND to set 0x6A address\
+	CS - pulled to 3V3 - data sheet does not state requirement of a resistor , cant find out if there is an internal pull-up\
+	SDX/SCX - no use case in mode 1 - option was either connect to VDD_IO (HIGH) or GND (LOW). Pulled to GND.\
+	INT1/INT2 - programmable interrupt. INT1 routed to GPIO for ability to implement it in firmware. INT2 left floating.\
+				this will be used for the LSM6DSV can be configured to generate an interrupt when motion is detected, waking the nRF52840 from deep sleep. This is critical for battery life on a wearable. \
+				The flow would be: Device idle \uc0\u8594  nRF52840 in deep sleep (1.5\'b5A), IMU in low power mode User starts moving \u8594  IMU detects motion \u8594  pulls INT1 high \u8594  wakes nRF52840 instantly nRF52840 starts 				sampling and counting reps User stops \u8594  back to sleep Without INT1 connected you'd have to poll the IMU constantly which kills battery life. With it connected you get essentially free wake-on-motion. 				Configure it as an input with interrupt in firmware. Connected to P1.06\
+	SDO_AUX/OCS_AUX - not a feature In mode 1; left floating as per data sheet 
+\f0\b\fs50 \AppleTypeServices \cb1 \kerning1\expnd0\expndtw0 \
+\pard\tx720\tx1440\tx2160\tx2880\tx3600\tx4320\tx5040\tx5760\tx6480\tx7200\tx7920\tx8640\pardirnatural\partightenfactor0
+\cf0 Display\
+
+\fs26 HS91L02W2C01 (Shenzhen Hansheng, 0.91" OLED)\
+\pard\tx720\tx1440\tx2160\tx2880\tx3600\tx4320\tx5040\tx5760\tx6480\tx7200\tx7920\tx8640\pardirnatural\partightenfactor0
+
+\f1\b0 \cf0 SSD1306 controller, 128\'d732 monochrome white OLED, I2C interface. \
+Fixed I2C address 0x78 (per datasheet pin definition, page 7). \
+Shares I2C bus with LSM6DSV IMU (0x6A) on P1.04 (SDA) and P1.05 (SCL) \'97 no address conflict. \
+VCC 3.3V\'963.5V (per datasheet absolute max ratings, page 9) supplied from nRF52840 EXTSUPPLY rail. \
+VDD logic supply 1.65\'963.3V, also 3.3V. Connected by soldering display module directly onto 4 \'d7 2.54mm PTH pads on PCB (GND, VCC, SCL, SDA). Male header pins inserted through display module holes, soldered, excess clipped flush. \'91Max 29mA\
+\
+NOTE \'97 Layout: Reserve a 38\'d712mm keep-out zone on PCB surface matching display module body. Draw courtyard in KiCad covering full module footprint. Place no tall components within this zone as display sits directly on top. Position the 4 PTH pads centered on the board to align display symmetrically. Pads are 2.54mm pitch inline.
+\f0\b \
+\pard\tx720\tx1440\tx2160\tx2880\tx3600\tx4320\tx5040\tx5760\tx6480\tx7200\tx7920\tx8640\pardirnatural\partightenfactor0
+
+\fs50 \cf0 I2C BUS PULLUP RESISTORS\
+\pard\tx720\tx1440\tx2160\tx2880\tx3600\tx4320\tx5040\tx5760\tx6480\tx7200\tx7920\tx8640\pardirnatural\partightenfactor0
+
+\f1\b0\fs26 \cf0 SDA (P1.04) and SCL (P1.05) pullups to 3.3V are DNP. I2C bus pullups are provided by the onboard 4.7K resistors on the HS91L02W2C01 display module (confirmed from module schematic, page 8, R6 and R7). \
+These serve the entire bus including the LSM6DSV IMU. \
+Footprints retained on PCB for flexibility in case display is replaced with a module lacking onboard pullups. \
+Distance from pullup to MCU is not a concern at this PCB scale \'97 total trace length across the entire bus is under 30mm with only two devices, making capacitive effects negligible. \
+4.7k\uc0\u937  is sufficient to meet the 300ns maximum rise time specified in the display datasheet (page 11, AC characteristics).
+\f0\b\fs50 \
+\pard\tx720\tx1440\tx2160\tx2880\tx3600\tx4320\tx5040\tx5760\tx6480\tx7200\tx7920\tx8640\pardirnatural\partightenfactor0
+\cf0 Battery\
+
+\f1\b0\fs26 The battery chosen is DC 3.7V 200mAh 302035 LiPo, 200mAh rated; max 0.2A continuous current\
+\
+Max continuous discharge 200mA (1C). Dimensions 36\'d720\'d73mm. \
+Connector: JST PH 2mm pitch, 2-pin pigtail \'97 PCB receptacle LCSC C295747. \
+Charge current set to 100mA (0.5C) via BQ24074 ISET resistor. Battery voltage monitored via 1M\uc0\u937 /1M\u937  divider to nRF52840 AIN pin; 4.2V = 100%, 3.0V = 0%. Cell includes onboard protection PCB (OVP, overdischarge, short circuit) \'97 safety net only, PMIC is primary protection.\
+\
+ISET. From datasheet eqn 2:\
+\pard\tx720\tx1440\tx2160\tx2880\tx3600\tx4320\tx5040\tx5760\tx6480\tx7200\tx7920\tx8640\pardirnatural\partightenfactor0
+\cf0 {{\NeXTGraphic Pasted Graphic.png \width6760 \height2260 \appleattachmentpadding0 \appleembedtype0 \appleaqc
+}¬}\
+I will use a 8.9K from ISET to GND 1% tolerance . Used 9K because of stock.\
+\
+\pard\pardeftab720\sa319\partightenfactor0
+
+\f5\b\fs24 \cf0 \expnd0\expndtw0\kerning0
+\outl0\strokewidth0 \strokec2 TS (pin 1)\
+\pard\pardeftab720\sa240\partightenfactor0
+
+\f3\b0 \cf0 Your battery has no NTC thermistor. Per datasheet page 25, for applications not using TS monitoring connect a 
+\f5\b 10k\uc0\u937  resistor from TS to GND
+\f3\b0 . This holds the pin at a valid voltage so the charger doesn't think there's a temperature fault and suspend charging. That's it, one resistor to GND, done.\
+\pard\tx720\tx1440\tx2160\tx2880\tx3600\tx4320\tx5040\tx5760\tx6480\tx7200\tx7920\tx8640\pardirnatural\partightenfactor0
+
+\f1\fs26 \cf0 \kerning1\expnd0\expndtw0 \outl0\strokewidth0 \
+\pard\tx720\tx1440\tx2160\tx2880\tx3600\tx4320\tx5040\tx5760\tx6480\tx7200\tx7920\tx8640\pardirnatural\partightenfactor0
+
+\f0\b\fs50 \cf0 \
+PMIC\
+
+\f1\b0\fs26 BQ24074 - USB charger with smart power path management\
+Selectable 100mA and 500mA max input current, 100mA max current limit ensures compliance to USB-IF standard\
+\
+From the datasheet page 6, the EN1/EN2 pins offer four modes: both low gives USB100 (100mA input limit), \
+											EN1 high EN2 low gives USB500 (500mA input limit), \
+											EN1 low EN2 high gives resistor-programmable mode via ILIM pin, and both high puts the device in standby/suspend. \
+USB100 was rejected immediately because with a 100mA input limit and 100mA charge current there is zero headroom left for the system load \'97 the nRF52840 alone draws more than that when active. Resistor-programmable and standby are unnecessary complexity for v1. \
+USB500 was selected (EN1 high, EN2 low) giving a 500mA input limit from the USB port, which allows 100mA to charge the battery while leaving ~400mA available for the system load consisting of the MCU, IMU, and display \'97 well within what a standard USB port supplies.
+\f0\b\fs50 \
+BQ24074
+\fs26 \
+
+\f1\b0 The bq24074 is a linear Li-Ion charger and power-path management IC from TI's bq2407x family. Its Dynamic Power Path Management (DPPM) simultaneously powers the system and charges the battery from the same input, reducing unnecessary battery cycles and allowing operation with a depleted cell. Charge current, input current limit, and termination threshold are all resistor-programmable. The bq24074 was selected over other family variants for its adjustable termination current (ITERM pin) and wider input voltage range of 4.35\'9610.5V, accommodating unregulated adapters alongside USB. Onboard protections include OVP, thermal regulation, reverse current blocking, and short-circuit detection, all in a 3\'d73mm 16-pin QFN.}
