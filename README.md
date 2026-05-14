@@ -25,23 +25,8 @@ Rep count and exercise type are displayed in real time on a small OLED screen. T
 ## Hardware
 
 ### System block diagram
+<img width="297" height="368" alt="Screenshot 2026-05-14 at 12 40 06 PM" src="https://github.com/user-attachments/assets/c08bb763-308a-4009-9073-6c5b69732f2c" />
 
-```
-USB-C ──────────────────────────────────┐
-                                        ▼
-LiPo battery ──────────────► BQ24074 PMIC ──► VDDH
-                              (power path +         │
-                               LiPo charger)        ▼
-                                             nRF52840 QFN73
-                                             internal DC-DC
-                                             REG0 (DCDCEN0)
-                                                    │
-                                             3.3V EXTSUPPLY
-                                            ┌───────┴────────┐
-                                            ▼                ▼
-                                       LSM6DSV IMU       OLED display
-                                       (I2C 0x6A)        (I2C 0x78)
-```
 
 ### MCU — nRF52840 QIAA QFN73
 
